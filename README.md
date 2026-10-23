@@ -1,140 +1,143 @@
-# Fall Detection System
+# 老年人跌倒监测系统（腕戴 IMU）
 
-Official implementation of [Comparative Study on Performance of ML Models for
-Fall Detection in Older People](https://www.preprints.org/manuscript/202312.2027/download/final_file).
+> 用 **ESP32-S3 + MPU6050** 做腕戴式跌倒检测。核心判据：**佩戴部位终态倾角 > 60° 且持续 ≥ 3 秒**。
+> 在 SisFall **全量 4505 条**记录上验证：**跌倒召回 99.11%、日常误报 1.29%、F1 98.59%**；实机已跑通实时报警。
 
-## Baseline objective
+---
 
-This repository provides a reproducible binary baseline for the SisFall dataset.
-Normal windows are label `0`; a window containing at least one pre-fall or fall
-sample is label `1`. The experiment compares fixed traditional baselines with one
-compact deep-learning baseline without feature engineering or hyperparameter
-search.
+## 30 秒看懂
 
-## Dataset
+| 问题 | 回答 |
+|---|---|
+| 基于什么 | **IMU（MPU6050 六轴）**，当前判定使用加速度三轴；数据验证用 **SisFall** 公开数据集 |
+| 核心方法 | 规则法「**终态倾角 > 60° 持续 ≥ 3 秒**」+ 静止确认 + 冲击加分项（不是深度学习黑盒） |
+| 现在做到哪 | 算法全量验证完成 + 实机实时判定跑通（放倒 64°、保持 3.0s 触发报警）；语音与联网上报方案已出、未实装 |
 
-SisFall contains two accelerometers and one gyroscope sampled at 200 Hz. The nine
-input channels are retained: three axes from each sensor. The original directory
-provides sensor values and SisFall Enhanced provides sample labels.
+---
 
-Only original recordings with a matching enhanced-label recording are used.
-Unmatched original files are reported and skipped; source files are never renamed
-or modified.
+## 一、项目定位
 
-## Run the notebook
+面向独居老人的可穿戴跌倒监测设备，目标是**低误报、能区分"真跌倒"与"坐下/躺下/弯腰"**。
+参赛方向：中国大学生计算机设计大赛（2027）。
 
-1. Install the dependencies:
+与常见方案的关键差异：多数开源项目用「倾角 > 60° **且** 角速度 > 45°/s」——要求"转得足够快"，
+因此**慢速滑坐跌倒会被漏掉**。本项目的判据只看**终态姿态是否持续倒地**，抓得住慢速跌倒。
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+---
 
-2. Place the datasets under `data/SisFall_Dataset` and
-   `data/SisFall_Enhanced`, or configure their paths in `Main.ipynb`.
-3. Open `Main.ipynb` and run all cells from top to bottom.
+## 二、技术底座
 
-Local and Colab paths can also be set through:
+| 层 | 选型 | 说明 |
+|---|---|---|
+| 传感器 | **MPU6050**（GY-521 模块） | 六轴 IMU：3 轴加速度 + 3 轴陀螺仪；当前判定用加速度三轴 |
+| 主控 | **ESP32-S3-DevKitC-1（N16R8）** | Arduino IDE 开发，I2C 自动识别引脚（默认 SDA=10 / SCL=11） |
+| 数据验证 | **SisFall** | 4505 条（跌倒 1798 + 日常 2707），23 名青年 + 15 名老年，腰部佩戴 200Hz |
+| 固件 | 纯 `Wire.h` 实现 | 不依赖任何传感器库，50Hz 采样，无动态内存 |
+| 语音（规划） | ASR Pro 离线语音模块 | 串口 19200，播报"您还好吗"，识别"我没事"取消报警 |
+| 报警（规划） | ESP32 WiFi → 云函数 → 家属端 | 企业微信机器人 / 小程序 |
 
-```text
-SISFALL_DATASET_PATH
-SISFALL_ENHANCED_PATH
-SISFALL_CACHE_PATH
-SISFALL_RESULT_PATH
-SISFALL_N_JOBS
+---
+
+## 三、当前进展
+
+### 已完成
+
+| 阶段 | 内容 | 证据 |
+|---|---|---|
+| 判据设计 | 终态倾角 + 持续时长 + 静止确认三通道 | `04_姿态解算实验/实验结论.md` |
+| 小样本验证 | SA01–SA05，625 文件：召回 99.5%、误报 0.8% | 同上 |
+| **全量复验** | **4505 条：召回 99.11%、误报 1.29%、F1 98.59%** | `08_全量复验/全量复验报告.md` |
+| 防过拟合 | 受试者级 5 折交叉验证：F1 = 98.5 ± 0.2% | `08_全量复验/交叉验证_受试者级5折.csv` |
+| 口径自查 | 官方口径 vs 严格口径双口径并列，未改任何标注 | `09_.../互补性分析与口径自查报告.md` |
+| 通道互补性 | 姿态通道漏报的 16 例，冲击通道 100% 能接住 | 同上 |
+| **实机通信** | I2C 通、WHO_AM_I=0x68、静置合矢量 ≈1.00g | `10_实机调试/实机三步验收记录.md` |
+| **实机判定** | **放倒 64°、保持 3.0s 成功触发报警** | 同上 |
+
+### 进行中 / 未完成（如实列出）
+
+- **腕部复验**：SisFall 是腰部佩戴、**无腕部通道**，现有 99.11% 是腰部口径；腕部数据待采。
+- **实机准确率统计**：尚未完成"真跌倒 10 次 / 躺下 10 次 / 日常 20 次"的 40 次实测。
+- **语音确认**：ASR Pro 模块与代码尚未接入。
+- **联网报警**：云函数与家属端尚未实装。
+
+---
+
+## 四、核心数字（SisFall 全量 4505 条 · 固定规则 60°/3s）
+
+| 指标 | 数值 |
+|---|---|
+| 跌倒召回 | **99.11%**（1782 / 1798） |
+| 日常误报 | **1.29%**（35 / 2707） |
+| 精确率 | 98.07% |
+| F1 | **98.59%** |
+| 受试者级 5 折 CV | **F1 = 98.5 ± 0.2%** |
+
+> 误报 35 例全部集中在 D12/D14/D17/D16 四类"躺/卧/座椅"动作，可由语音确认化解。
+> 严格口径（把 D11/D18 也视为应报警）下召回降为 84.54%，该口径已并列披露，未做任何标注改写。
+
+---
+
+## 五、仓库导航（老师从这里看起）
+
+| 目录 | 看什么 | 建议阅读顺序 |
+|---|---|---|
+| `01_策划书/` | 项目背景、创新点、技术路线（HTML 可直接浏览器打开） | ① 先看 HTML |
+| `05_开源资源清单/` | 参考项目评估：哪些值得学、哪些不能用 | ② |
+| `04_姿态解算实验/` | 判据怎么来的、跌倒 vs 坐下的倾角分离 | ③ |
+| `08_全量复验/` | **核心结论**：4505 条全量结果 + 混淆矩阵 + 交叉验证 | ④ 重点 |
+| `09_通道互补性与口径敏感性/` | 双通道为什么必要、口径敏感性自查 | ⑤ |
+| `10_实机调试/` | **实机固件 + 三步验收记录**（接线、烧录、实测） | ⑥ |
+| `11_产品化方案/` | 手表形态、语音交互、小程序报警落地方案 | ⑦ |
+| `07_行动清单/` | 采购清单与后续计划 | ⑧ |
+| `02_SisFall数据分析/` | 数据集探索脚本与对比图 | 选看 |
+
+> 编号 03 / 06 为**第三方参考代码**，体积大且涉及许可证，未纳入本仓库；来源见文末"参考来源"。
+
+---
+
+## 六、固件说明（`10_实机调试/`）
+
+| 程序 | 作用 |
+|---|---|
+| `MPU6050_autodetect/` | 自动扫描 I2C 引脚，确认传感器地址（第一关） |
+| `I2C_static_check/` | 静置体检：寄存器 + 三轴均值/抖动 σ + 合矢量/倾角（第二关） |
+| `Fall_detect_lite/` | **主程序**：三通道实时跌倒判定（第三关），纯 Wire 实现 |
+
+接线：`VCC→3V3`、`GND→GND`、`SDA→GPIO10`、`SCL→GPIO11`（程序可自动识别其他组合）。
+串口 115200，`y` = 我没事，`r` = 复位。
+
+**演示动作**：手持轻晃 → 放倒到接近水平 → 保持不动 3 秒 → 报警。
+（注意：摔到桌面后**终态平放**不报警是设计特性，用于排除"掉东西/跳绳"类误报。）
+
+---
+
+## 七、复现方式
+
+```bash
+# 需要：Python 3 + pandas + numpy + scipy + matplotlib，以及 SisFall 数据集
+python 02_SisFall数据分析/sisfall_batch_analysis.py
+python 04_姿态解算实验/姿态解算实验.py
+python 08_全量复验/全量复验.py
+python 09_通道互补性与口径敏感性/通道互补性分析.py
 ```
 
-By default, the notebook keeps all generated data and results in memory and writes
-nothing to disk. Set `SAVE_ARTIFACTS = True` to enable the versioned preprocessing
-cache and save reports, plots, predictions, and manifests. Model persistence is a
-separate `SAVE_MODELS` option and is also disabled by default. When caching is
-enabled, set `REPROCESS_DATA = True` after changing the data or preprocessing.
+固件：Arduino IDE 打开对应 `.ino`，选择 `ESP32S3 Dev Module` 烧录，详见 `10_实机调试/实机三步验收记录.md`。
 
-## Experimental protocol
+---
 
-### Chronological trial split
+## 八、边界与诚实声明
 
-The baseline evaluates later repetitions from known subjects. In every complete
-five-repetition subject/activity group, `R01–R04` are assigned to development and
-`R05` to testing. The latest development repetition is reserved for CNN
-validation, leaving the earlier trials for model fitting.
+1. 本系统是**竞赛原型**，不是医疗器械，可能漏报或误报。
+2. SisFall 为**腰部佩戴**，本项目产品为**腕戴**；腕部迁移尚未完成实测验证。
+3. 全量 99.11% 为**离线规则回放**结果，不等于实机佩戴准确率。
+4. 参考项目仅借鉴**架构与接线思路**，**判定算法为本项目自行设计与验证，未拷贝任何参考项目代码**。
 
-Activities recorded once per subject cannot be divided chronologically. They are
-reproducibly stratified by activity, activity class, and age group. Windows from
-one recording never cross split boundaries. The notebook reports subject,
-activity, and binary-label coverage for every split.
+---
 
-### Binary raw windows
+## 九、参考来源
 
-Each recording is independently divided into non-overlapping one-second windows
-of 200 samples. Incomplete tails are dropped. Window targets are:
-
-- `0`: every sample is normal.
-- `1`: at least one sample is pre-fall (`2`) or fall (`1`).
-
-No channel selection, handcrafted feature extraction, difference transformation,
-or window-level resampling is applied.
-
-### Scaling
-
-A `StandardScaler` fits one independent mean and standard deviation for each of
-the nine channels using fit-trial samples only. The same fitted statistics are
-applied to validation and test samples. Test data never influence scaling.
-
-### Class imbalance
-
-Learned models use balanced class weights. Training windows are not duplicated,
-and validation and test distributions remain unchanged.
-
-## Models
-
-The fixed traditional set contains:
-
-- Majority-class dummy reference
-- Linear logistic classifier trained with stochastic gradient descent
-- Random forest
-
-KNN is excluded because flattened time-series windows are high-dimensional,
-prediction is comparatively expensive, and KNN has no native class weighting.
-
-The deep baseline is one compact 1D CNN with two convolution blocks, global
-average pooling, and a small dense classifier. It uses Adam, binary
-cross-entropy, balanced class weights, and early stopping on validation PR-AUC.
-
-## Evaluation
-
-The notebook reports only standard binary outcomes:
-
-- Accuracy and balanced accuracy
-- Positive-class precision, recall, and F1
-- ROC-AUC and PR-AUC
-- Classification reports
-- Confusion matrices with counts and row percentages
-- Overlaid ROC and precision–recall curves
-- CNN training and validation curves
-- Training and inference time
-
-Predictions, probability scores, reports, plots, split manifests, fitted models,
-and the run configuration are saved under the configured result directory.
-
-## Project structure
-
-- `Main.ipynb`: presentation-oriented experiment runner.
-- `dataset_analysis.py`: dataset indexing, pairing, summaries, and trial plots.
-- `splitting_protocols.py`: reproducible trial-level assignments.
-- `data_processor.py`: sensor parsing, binary windowing, and metadata.
-- `baseline_pipeline.py`: caching and train-only channel scaling.
-- `baseline_models.py`: traditional baselines and compact 1D CNN.
-- `baseline_evaluation.py`: binary metrics, reports, and plots.
-- `experiment_utils.py`: lightweight logging, timing, and run manifests.
-
-## Citation
-
-```bibtex
-@article{Esfahani2025FallDetection,
-  title={Comparative Study on Performance of ML Models for Fall Detection in Older People},
-  author={Mohammadali Sefidi Esfahani and Mohammad Fattahian},
-  journal={Journal of Artificial Intelligence, Virtual Reality, and Human-Centered Computing},
-  year={2025},
-  pages={1-5}
-}
-```
+| 项目 | 链接 | 借鉴点 |
+|---|---|---|
+| ESP32-Elderly-Fall-Detection-System | https://github.com/FunMax-Edward/ESP32-Elderly-Fall-Detection-System | ESP32+MPU6050 接线、模块划分、ASR Pro 用法 |
+| ai-for-social-good-2026-fall-detection（EdgeFall） | https://github.com/luoxianshengluo394-max/ai-for-social-good-2026-fall-detection | 腕戴形态、50Hz 采样、语音确认流程、表壳设计 |
+| SisFall 数据集 | https://github.com/JiayangLai/SisFallDatasetAnnotation | 验证数据来源 |

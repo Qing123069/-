@@ -1,7 +1,20 @@
-__pycache__/
-*.py[cod]
-.ipynb_checkpoints/
+# 第三方参考代码与大数据集不入库
+06_已下载的参考代码/
+03_参考代码_3D_Pose_ays/
+SisFall/
+*.zip
+*.7z
+*.rar
 
-# Local datasets and generated experiment artifacts
-data/
-artifacts/
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
